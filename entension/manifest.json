@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "AI Real-Time Toxicity Filter",
+  "version": "1.4.4",
+  "description": "Filters potentially toxic comments, live chat, and messages across major social platforms using local toxicity models.",
+  "permissions": ["activeTab", "storage"],
+  "action": {
+    "default_title": "AI Real-Time Toxicity Filter",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": ["<all_urls>", "http://127.0.0.1:8000/*"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

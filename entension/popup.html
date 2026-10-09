@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Real-Time Toxicity Filter</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6fb;
+      --panel: #ffffff;
+      --fg: #1d2942;
+      --muted: #778198;
+      --border: #e4e9f3;
+      --accent: #625bf6;
+      --accent-soft: #eeedff;
+      --teal: #12a895;
+      --coral: #f07568;
+      --ok: #15a887;
+      --bad: #e45c69;
+      --track-off: #cbd3e1;
+      --surface: #f4f6fb;
+      --shadow: 0 8px 24px rgba(35, 48, 82, .055);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #151a28;
+        --panel: #1d2435;
+        --fg: #edf1ff;
+        --muted: #a1abc2;
+        --border: #30394e;
+        --accent: #a29bff;
+        --accent-soft: #302d51;
+        --teal: #46d1bd;
+        --coral: #ff9187;
+        --ok: #46d1bd;
+        --bad: #ff8590;
+        --track-off: #45506a;
+        --surface: #252d41;
+        --shadow: 0 8px 24px rgba(0, 0, 0, .18);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      width: 320px;
+      max-height: 600px;
+      overflow-y: auto;
+      margin: 0;
+      padding: 16px;
+      background: radial-gradient(ellipse at 10% -5%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 46%), var(--bg);
+      color: var(--fg);
+      font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -.25px;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      padding: 13px;
+      margin-bottom: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .label { font-weight: 500; }
+    .hint { margin-top: 2px; font-size: 12px; color: var(--muted); }
+
+    /* Status indicator */
+    .status { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .status.connected .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+    .status.disconnected .dot { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+
+    /* Toggle switch */
+    .switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider-track {
+      position: absolute; inset: 0;
+      background: var(--track-off);
+      border-radius: 24px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .slider-track::before {
+      content: "";
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .switch input:checked + .slider-track { background: var(--accent); }
+    .switch input:checked + .slider-track::before { transform: translateX(18px); }
+    .switch input:focus-visible + .slider-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* Threshold slider */
+    .value { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
+    input[type="range"] {
+      width: 100%;
+      margin: 10px 0 2px;
+      accent-color: var(--accent);
+    }
+    .scale {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--muted);
+    }
+    .disabled { opacity: 0.5; pointer-events: none; }
+    .tabs { display:flex; gap:5px; margin-bottom:12px; padding:4px; border:1px solid var(--border); border-radius:11px; background:var(--panel); }
+    .tab { flex:1; border:0; border-radius:8px; padding:8px; color:var(--muted); background:transparent; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; transition:background .16s ease,color .16s ease,box-shadow .16s ease; }
+    .tab.active { color:var(--accent); background:var(--accent-soft); box-shadow:0 1px 3px rgba(30,40,80,.08); }
+    .dashboard-heading { padding:4px 2px 9px; }
+    .eyebrow { color:var(--accent); font-size:9px; font-weight:800; letter-spacing:1.1px; text-transform:uppercase; }
+    .dashboard-title { margin-top:3px; font-size:18px; line-height:1.2; font-weight:750; letter-spacing:-.4px; }
+    .local-pill { display:inline-flex; align-items:center; gap:5px; border-radius:99px; padding:4px 7px; color:var(--teal); background:color-mix(in srgb, var(--teal) 11%, var(--panel)); font-size:9px; font-weight:700; letter-spacing:.35px; text-transform:uppercase; }
+    .local-pill::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
+    .metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .metric { min-height:82px; position:relative; overflow:hidden; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:11px; }
+    .metric::after { content:""; position:absolute; width:43px; height:43px; border-radius:50%; right:-15px; top:-15px; background:var(--metric-tint, var(--accent-soft)); opacity:.8; }
+    .metric.scanned { --metric-tint:color-mix(in srgb, var(--accent) 13%, transparent); }
+    .metric.blurred { --metric-tint:color-mix(in srgb, var(--coral) 17%, transparent); }
+    .metric strong { display:block; font-size:23px; line-height:1.1; font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+    .metric span,.small { color:var(--muted); font-size:11px; }
+    .metric span { display:block; margin-top:5px; }
+    .wellness-card { overflow:hidden; background:linear-gradient(130deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), var(--panel) 72%); }
+    .score-wrap { display:flex; align-items:center; gap:12px; margin-top:12px; }
+    .score { flex:0 0 68px; width:68px; height:68px; border-radius:50%; display:grid; place-items:center; font-size:21px; font-weight:750; color:var(--score-color, var(--teal)); background:var(--panel); border:5px solid color-mix(in srgb, var(--score-color, var(--teal)) 24%, var(--panel)); box-shadow:inset 0 0 0 2px var(--panel), 0 4px 12px color-mix(in srgb, var(--score-color, var(--teal)) 15%, transparent); }
+    .score-copy { min-width:0; }
+    .score-copy .label { font-weight:700; }
+    .score-copy .hint { line-height:1.35; }
+    .wellness-card.score-mid { --score-color:#d69b35; }
+    .wellness-card.score-low { --score-color:var(--coral); }
+    .chart-row { display:grid; grid-template-columns:94px 1fr 30px; align-items:center; gap:8px; margin-top:11px; font-size:11px; }
+    .chart-row > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .chart-row strong { text-align:right; font-size:11px; font-variant-numeric:tabular-nums; }
+    .bar { height:8px; border-radius:9px; background:var(--surface); overflow:hidden; }
+    .bar i { display:block; min-width:3px; height:100%; background:var(--bar-color, var(--accent)); border-radius:9px; }
+    .chart-row:nth-child(6n+1) { --bar-color:var(--accent); }
+    .chart-row:nth-child(6n+2) { --bar-color:var(--coral); }
+    .chart-row:nth-child(6n+3) { --bar-color:var(--teal); }
+    .chart-row:nth-child(6n+4) { --bar-color:#e6b64c; }
+    .chart-row:nth-child(6n+5) { --bar-color:#6fa6e8; }
+    .chart-row:nth-child(6n) { --bar-color:#bc79c9; }
+    .community-row { display:flex; align-items:flex-start; gap:10px; }
+    .flag-icon { flex:0 0 32px; width:32px; height:32px; display:grid; place-items:center; border-radius:10px; color:var(--coral); background:color-mix(in srgb, var(--coral) 12%, var(--panel)); font-size:16px; }
+    #flag-count { color:var(--accent); font-size:18px; font-variant-numeric:tabular-nums; }
+    #analytics-note { text-align:center; padding:0 0 5px; font-size:10px; }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <h1>AI Real-Time Toxicity Filter</h1>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" id="settings-tab" role="tab" aria-selected="true">Settings</button>
+    <button class="tab" id="dashboard-tab" role="tab" aria-selected="false">Dashboard</button>
+  </div>
+
+  <section id="settings-view">
+
+  <div class="card">
+    <div id="status" class="status">
+      <span class="dot"></span>
+      <span id="status-text">Checking…</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="label">Real-time filtering</div>
+        <div class="hint">Comments, direct messages, and live chat</div>
+      </div>
+      <label class="switch" aria-label="Enable real-time checking">
+        <input type="checkbox" id="enabled" />
+        <span class="slider-track"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card" id="threshold-card">
+    <div class="row">
+      <div class="label">Toxicity threshold</div>
+      <div class="value" id="threshold-value">0.60</div>
+    </div>
+    <input type="range" id="threshold" min="0.1" max="0.9" step="0.05" value="0.6" />
+    <div class="scale"><span>More sensitive</span><span>Less sensitive</span></div>
+  </div>
+
+  <div class="card" id="mode-card">
+    <div class="row">
+      <div>
+        <div class="label">When content is flagged</div>
+        <div class="hint">Blurred text stays in place; click it to reveal</div>
+      </div>
+    </div>
+    <select id="filter-mode" aria-label="Filtering action" style="width:100%;margin-top:10px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)">
+      <option value="blur">Blur text and click to reveal</option>
+      <option value="hide">Hide item with a reveal option</option>
+    </select>
+  </div>
+  </section>
+
+  <section id="dashboard-view" hidden>
+    <div class="dashboard-heading"><div class="row"><div><div class="eyebrow">Your activity</div><div class="dashboard-title">Digital wellbeing</div></div><span class="local-pill">On device</span></div></div>
+    <div class="card"><div class="metric-grid">
+      <div class="metric scanned"><strong id="scanned-count">0</strong><span>Comments scanned</span></div>
+      <div class="metric blurred"><strong id="blurred-count">0</strong><span>Comments blurred</span></div>
+    </div></div>
+    <div class="card wellness-card" id="wellness-card"><div class="row"><div class="label">Wellness score</div><span class="small">0–100</span></div><div class="score-wrap">
+      <div class="score" id="wellness-score">100</div><div class="score-copy"><div class="label" id="wellness-label">Your feed looks calm</div><div class="hint" id="wellness-hint">Based on toxicity detected across visited sites.</div></div>
+    </div></div>
+    <div class="card"><div class="row"><div class="label">Toxicity types</div><span class="small">Share of detections</span></div><div id="category-chart" class="small" style="margin-top:4px">No flagged comments yet.</div></div>
+    <div class="card"><div class="community-row"><span class="flag-icon" aria-hidden="true">⚑</span><div style="flex:1"><div class="row"><div class="label">Community flags</div><strong id="flag-count">0</strong></div><div class="hint">Right-click a comment to report it. Reports are saved locally as feedback for review.</div></div></div></div>
+    <div class="small" id="analytics-note">Stats are stored on this device.</div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>

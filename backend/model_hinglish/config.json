@@ -1,0 +1,50 @@
+{
+  "add_cross_attention": false,
+  "architectures": [
+    "XLMRobertaForSequenceClassification"
+  ],
+  "attention_probs_dropout_prob": 0.1,
+  "bos_token_id": 0,
+  "classifier_dropout": null,
+  "dtype": "float32",
+  "eos_token_id": 2,
+  "gradient_checkpointing": false,
+  "hidden_act": "gelu",
+  "hidden_dropout_prob": 0.1,
+  "hidden_size": 768,
+  "id2label": {
+    "0": "profanity_vulgarity",
+    "1": "targeted_abuse_harassment",
+    "2": "discriminatory_hate_speech",
+    "3": "caste",
+    "4": "communal_religious",
+    "5": "regional_xenophobic",
+    "6": "misogyny_gender"
+  },
+  "initializer_range": 0.02,
+  "intermediate_size": 3072,
+  "is_decoder": false,
+  "label2id": {
+    "caste": 3,
+    "communal_religious": 4,
+    "discriminatory_hate_speech": 2,
+    "misogyny_gender": 6,
+    "profanity_vulgarity": 0,
+    "regional_xenophobic": 5,
+    "targeted_abuse_harassment": 1
+  },
+  "layer_norm_eps": 1e-05,
+  "max_position_embeddings": 514,
+  "model_type": "xlm-roberta",
+  "num_attention_heads": 12,
+  "num_hidden_layers": 12,
+  "output_past": true,
+  "pad_token_id": 1,
+  "position_embedding_type": "absolute",
+  "problem_type": "multi_label_classification",
+  "tie_word_embeddings": true,
+  "transformers_version": "5.15.0",
+  "type_vocab_size": 1,
+  "use_cache": false,
+  "vocab_size": 250002
+}
