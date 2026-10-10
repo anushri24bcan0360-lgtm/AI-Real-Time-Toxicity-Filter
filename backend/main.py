@@ -20,7 +20,7 @@ HINGLISH_MODEL_DIR = os.getenv(
 )
 ONNX_PATH = os.path.join(MODEL_DIR, "model.onnx")
 MAX_LEN = 128
-THRESHOLD = 0.6
+THRESHOLD = 0.8
 CATEGORIES = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 HINGLISH_TO_CANONICAL = {
     "profanity_vulgarity": ("toxic", "obscene"),
@@ -33,15 +33,18 @@ HINGLISH_TO_CANONICAL = {
 }
 HINGLISH_MARKERS = {
     "aap", "acha", "accha", "apna", "apne", "aur", "bakwas", "bahut",
-    "bhai", "bhi", "bura", "chutiya", "gaali", "gaya", "gayi", "hai",
-    "hain", "ho", "hum", "ka", "kaise", "kaisa", "karna", "karo", "ke",
-    "ki", "ko", "kya", "kyu", "kyun", "kyunki", "main", "mat", "mein",
-    "mera", "meri", "mere", "mujhe", "nahi", "nahin", "pagal", "par",
-    "raha", "rahe", "rahi", "se", "tera", "tere", "teri", "tha", "the",
-    "thi", "toh", "tum", "tumhara", "tujhe", "tu", "wala", "wali", "wale",
-    "yaar",
+    "abhi", "aisa", "aisi", "aise", "behen", "bhen", "bhai", "bhi", "bilkul",
+    "bura", "chup", "chutiya", "chutiye", "gaali", "gaandu", "gandu", "gaya",
+    "gayi", "hai", "hain", "harami", "ho", "hona", "hoon", "hu", "hum", "ka",
+    "kaise", "kaisa", "kamina", "kamine", "karna", "karo", "ke", "ki", "ko",
+    "kuch", "kya", "kyu", "kyun", "kyunki", "madarchod", "mat", "mein", "mera",
+    "meri", "mere", "mujhe", "nahin", "nahi", "nalla", "pagal", "raha", "rahe",
+    "rahi", "saala", "sala", "saali", "sali", "tera", "tere", "teri", "tha", "the",
+    "thi", "toh", "tum", "tumhara", "tumhe", "tujhe", "tujh", "tu", "wala", "wali",
+    "wale", "yaar", "ye", "yeh",
 }
 LATIN_WORD_RE = re.compile(r"[a-z]+", re.IGNORECASE)
+DEVANAGARI_RE = re.compile(r"[\u0900-\u097f]")
 
 # Populated on startup
 resources: Dict[str, object] = {}
@@ -50,14 +53,31 @@ resources: Dict[str, object] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     torch.set_num_threads(max(1, int(os.getenv("TORCH_NUM_THREADS", "2"))))
+    required_files = (
+        os.path.join(MODEL_DIR, "model.onnx"),
+        os.path.join(MODEL_DIR, "tokenizer.json"),
+        os.path.join(HINGLISH_MODEL_DIR, "config.json"),
+        os.path.join(HINGLISH_MODEL_DIR, "model.safetensors"),
+        os.path.join(HINGLISH_MODEL_DIR, "tokenizer.json"),
+    )
+    missing_files = [path for path in required_files if not os.path.isfile(path)]
+    if missing_files:
+        missing_list = "\n  ".join(missing_files)
+        raise RuntimeError(f"Required local model files are missing:\n  {missing_list}")
+
+    print(f"Loading English ONNX model from {MODEL_DIR}", flush=True)
     resources["tokenizer"] = BertTokenizerFast.from_pretrained(
-        MODEL_DIR, do_lower_case=True
+        MODEL_DIR, do_lower_case=True, local_files_only=True
     )
 
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     resources["session"] = ort.InferenceSession(
         ONNX_PATH, sess_options=opts, providers=["CPUExecutionProvider"]
+    )
+    print(
+        f"Loading Hinglish XLM-R model from {HINGLISH_MODEL_DIR} (large local checkpoint)",
+        flush=True,
     )
     resources["hinglish_tokenizer"] = AutoTokenizer.from_pretrained(
         HINGLISH_MODEL_DIR, local_files_only=True
@@ -69,6 +89,7 @@ async def lifespan(app: FastAPI):
         int(index): str(label)
         for index, label in resources["hinglish_model"].config.id2label.items()
     }
+    print("Both local models are loaded; the API is ready.", flush=True)
     yield
     resources.clear()
 
@@ -93,9 +114,15 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 
 
 def likely_hinglish(text: str) -> bool:
-    """Route likely Romanized Hindi-English text to the specialist classifier."""
+    """Route Hindi/ Hinglish text to the specialist classifier, including short phrases."""
+    if DEVANAGARI_RE.search(text):
+        return True
     words = {word.lower() for word in LATIN_WORD_RE.findall(text)}
-    return len(words & HINGLISH_MARKERS) >= 2
+    markers = words & HINGLISH_MARKERS
+    # `main` and `par` are common English words too, so require another Hindi
+    # marker when either is the only match. A single distinctive marker such as
+    # `hai`, `yaar`, or a Hinglish abuse term is enough for short chat messages.
+    return len(markers) >= 2 or bool(markers - {"main", "par"})
 
 
 @app.get("/")
@@ -137,7 +164,8 @@ def analyze(request: CommentRequest):
     }
 
     # Model 2: Hinglish multi-label classifier. Map its taxonomy onto the
-    # extension's existing categories and use max fusion for a recall-first filter.
+    # extension's existing categories. For detected Hinglish, retain the stronger
+    # model score so a weak English-model score cannot dilute the specialist.
     hinglish_scores: Dict[str, float] = {}
     used_hinglish_model = likely_hinglish(request.comment)
     if used_hinglish_model:
@@ -157,15 +185,21 @@ def analyze(request: CommentRequest):
             for index, score in enumerate(hinglish_probs)
         }
 
-    scores = dict(english_scores)
+    hinglish_category_scores: Dict[str, float] = {}
     for label, destinations in HINGLISH_TO_CANONICAL.items():
         probability = hinglish_scores.get(label)
         if probability is None:
             continue
         for category in destinations:
-            scores[category] = max(scores[category], probability)
+            hinglish_category_scores[category] = max(
+                hinglish_category_scores.get(category, 0.0), probability
+            )
 
-    flagged: List[str] = [cat for cat, score in scores.items() if score > THRESHOLD]
+    scores = dict(english_scores)
+    for category, hinglish_score in hinglish_category_scores.items():
+        scores[category] = max(english_scores[category], hinglish_score)
+
+    flagged: List[str] = [cat for cat, score in scores.items() if score >= THRESHOLD]
 
     return {
         "is_toxic": len(flagged) > 0,

@@ -52,6 +52,13 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, .12) !important;
 }
 
+@media (hover: none), (pointer: coarse) {
+  [data-toxicity-blurred="true"]::after {
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
 [data-toxicity-blurred="true"] [data-toxicity-exempt="true"],
 [data-toxicity-blurred="true"] [data-toxicity-exempt="true"] * {
   color: var(--toxicity-exempt-color, currentColor) !important;

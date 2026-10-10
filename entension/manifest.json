@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Real-Time Toxicity Filter",
-  "version": "1.4.4",
+  "version": "1.4.6",
   "description": "Filters potentially toxic comments, live chat, and messages across major social platforms using local toxicity models.",
   "permissions": ["activeTab", "storage"],
   "action": {

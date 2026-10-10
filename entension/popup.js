@@ -2,7 +2,7 @@ const API_HEALTH_URL = "http://127.0.0.1:8000/";
 const STATUS_TIMEOUT_MS = 2000;
 const STATUS_REFRESH_MS = 5000;
 
-const DEFAULTS = { enabled: true, threshold: 0.6, filterMode: "blur", filterModeVersion: 2 };
+const DEFAULTS = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2 };
 
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
@@ -98,11 +98,24 @@ function renderEnabled(enabled) {
 async function loadSettings() {
   const saved = await chrome.storage.local.get(null);
   const migrateMode = (saved.filterModeVersion || 0) < 2;
+  const migrateThreshold = (saved.thresholdVersion || 0) < 1;
   const stored = { ...DEFAULTS, ...saved };
+  const updates = {};
   if (migrateMode) {
     stored.filterMode = "blur";
-    chrome.storage.local.set({ filterMode: "blur", filterModeVersion: 2 });
+    updates.filterMode = "blur";
+    updates.filterModeVersion = 2;
   }
+  if (migrateThreshold) {
+    const previousThreshold = Number(saved.threshold);
+    stored.threshold = Number.isFinite(previousThreshold)
+      ? Math.max(DEFAULTS.threshold, previousThreshold)
+      : DEFAULTS.threshold;
+    stored.thresholdVersion = 1;
+    updates.threshold = stored.threshold;
+    updates.thresholdVersion = 1;
+  }
+  if (Object.keys(updates).length) await chrome.storage.local.set(updates);
   renderEnabled(stored.enabled);
   renderThreshold(stored.threshold);
   filterModeInput.value = stored.filterMode;
@@ -118,7 +131,7 @@ enabledInput.addEventListener("change", () => {
 thresholdInput.addEventListener("input", () => {
   const threshold = parseFloat(thresholdInput.value);
   thresholdValue.textContent = formatThreshold(threshold);
-  chrome.storage.local.set({ threshold });
+  chrome.storage.local.set({ threshold, thresholdVersion: 1 });
 });
 
 filterModeInput.addEventListener("change", () => {

@@ -151,13 +151,19 @@
     "[class*='username' i]", "[id*='author' i]", "[role='heading']", "h1", "h2",
   ].join(",");
   const INSTAGRAM_COMMENT_ROW_SELECTOR = "li, [role='listitem']";
+  const INSTAGRAM_VIEWPORT_SELECTOR = [
+    "main li", "main [role='listitem']", "article li", "article [role='listitem']",
+    "[role='dialog'] li", "[role='dialog'] [role='listitem']",
+    "main [dir='auto']", "article [dir='auto']", "[role='dialog'] [dir='auto']", "[role='log'] [dir='auto']",
+  ].join(",");
   const INSTAGRAM_RESERVED_PROFILE_PATHS = new Set([
     "about", "accounts", "api", "challenge", "direct", "emails", "explore",
     "legal", "locations", "p", "privacy", "reel", "reels", "stories", "tags",
     "terms", "tv",
   ]);
-  const defaults = { enabled: true, threshold: 0.6, filterMode: "blur", filterModeVersion: 2 };
+  const defaults = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2 };
   let seen = new WeakMap();
+  let requestTokens = new WeakMap();
   const hidden = new WeakMap();
   const hiddenElements = new Set();
   let settings = { ...defaults };
@@ -225,23 +231,42 @@
 
   chrome.storage.local.get(null, (saved) => {
     const needsModeMigration = (saved.filterModeVersion || 0) < 2;
+    const needsThresholdMigration = (saved.thresholdVersion || 0) < 1;
     settings = { ...defaults, ...saved };
+    const updates = {};
     if (needsModeMigration) {
       settings.filterMode = "blur";
       settings.filterModeVersion = 2;
-      chrome.storage.local.set({ filterMode: "blur", filterModeVersion: 2 });
+      updates.filterMode = "blur";
+      updates.filterModeVersion = 2;
     }
+    if (needsThresholdMigration) {
+      const previousThreshold = Number(saved.threshold);
+      settings.threshold = Number.isFinite(previousThreshold)
+        ? Math.max(defaults.threshold, previousThreshold)
+        : defaults.threshold;
+      settings.thresholdVersion = 1;
+      updates.threshold = settings.threshold;
+      updates.thresholdVersion = 1;
+    }
+    if (Object.keys(updates).length) chrome.storage.local.set(updates);
     scan(document.body);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     const recheck = Boolean(changes.threshold || changes.filterMode || (changes.enabled && changes.enabled.newValue));
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
-    if (!settings.enabled) restoreAll();
+    if (!settings.enabled) {
+      seen = new WeakMap();
+      requestTokens = new WeakMap();
+      pending = [];
+      restoreAll();
+    }
     else {
       if (recheck) {
         for (const el of [...hiddenElements]) reveal(el);
         seen = new WeakMap();
+        requestTokens = new WeakMap();
       }
       scan(document.body);
     }
@@ -439,6 +464,7 @@
 
     // Analyze only explicit message-body fields, or text inside a recognized message row.
     for (const item of items) {
+      if (!isNearViewport(item)) continue;
       if (item.matches(BODY_SELECTOR)) addIfMessageText(item);
       for (const body of item.querySelectorAll(BODY_SELECTOR)) addIfMessageText(body);
 
@@ -461,7 +487,7 @@
       for (const row of scanRoot.querySelectorAll?.(INSTAGRAM_COMMENT_ROW_SELECTOR) || []) commentRows.add(row);
       let verifiedRows = 0;
       for (const row of commentRows) {
-        if (!isLikelyInstagramCommentRow(row)) continue;
+        if (!isNearViewport(row) || !isLikelyInstagramCommentRow(row)) continue;
         verifiedRows++;
         // Instagram's comment bodies don't have stable test IDs. In a verified
         // comment row, scan text spans outside usernames and action controls.
@@ -482,6 +508,7 @@
           textElements.add(textEl);
         }
         for (const textEl of textElements) {
+          if (!isNearViewport(textEl)) continue;
           if (textEl.closest("a, button, time, nav, header, footer, form, textarea, input, [contenteditable='true'], [role='heading'], [data-testid*='author' i], [data-testid*='username' i], [class*='author' i], [class*='username' i], [id*='author' i]")) continue;
           const row = findInstagramCommentRow(textEl);
           if (!row) continue;
@@ -615,7 +642,9 @@
       }
       if (seen.get(el) === text) continue;
       seen.set(el, text);
-      pending.push({ el, text });
+      const token = {};
+      requestTokens.set(el, token);
+      pending.push({ el, text, token });
     }
     drain();
   }
@@ -630,13 +659,15 @@
       incrementalScanTimer = null;
       const roots = [...queuedScanRoots];
       queuedScanRoots.clear();
-      if (roots.length > 40) {
-        scan(document.body || document.documentElement);
-        return;
-      }
       const minimalRoots = roots.filter((root) =>
         !roots.some((other) => other !== root && typeof other.contains === "function" && other.contains(root)),
       );
+      if (roots.length > 40) {
+        for (const root of minimalRoots) {
+          if (!(root instanceof Element) || isNearViewport(root)) scan(root);
+        }
+        return;
+      }
       for (const scanRoot of minimalRoots) scan(scanRoot);
     }, 20);
   }
@@ -646,16 +677,53 @@
     if (documentScanTimer !== null) return;
     documentScanTimer = setTimeout(() => {
       documentScanTimer = null;
-      scan(document.body || document.documentElement);
+      scanViewport();
     }, 80);
+  }
+
+  function scanViewport() {
+    const targets = new Set();
+    if (ITEM_SELECTOR !== ":not(*)") {
+      for (const item of document.querySelectorAll(ITEM_SELECTOR)) {
+        if (isNearViewport(item)) targets.add(item);
+      }
+    }
+
+    if (INSTAGRAM_HOST) {
+      for (const row of document.querySelectorAll(INSTAGRAM_COMMENT_ROW_SELECTOR)) {
+        if (isNearViewport(row) && isLikelyInstagramCommentRow(row)) targets.add(row);
+      }
+      const bubbleSelector = "main [dir='auto'], article [dir='auto'], [role='dialog'] [dir='auto'], [role='log'] [dir='auto']";
+      for (const text of document.querySelectorAll(bubbleSelector)) {
+        if (isLikelyInstagramBubbleText(text)) targets.add(text);
+      }
+    }
+
+    const roots = [...targets];
+    const selected = new Set(roots);
+    for (const root of roots) {
+      let nested = false;
+      for (let parent = root.parentElement; parent; parent = parent.parentElement) {
+        if (selected.has(parent)) {
+          nested = true;
+          break;
+        }
+      }
+      if (!nested) scan(root);
+    }
   }
 
   function drain() {
     pending.sort((a, b) => viewportPriority(a.el) - viewportPriority(b.el));
     while (active < MAX_ACTIVE && pending.length) {
       const job = pending.shift();
-      if (!job.el.isConnected || !settings.enabled || !isNearViewport(job.el)) {
-        seen.delete(job.el);
+      if (!job.el.isConnected || !settings.enabled || !isNearViewport(job.el) ||
+          requestTokens.get(job.el) !== job.token || seen.get(job.el) !== job.text ||
+          analysisTextOf(job.el) !== job.text) {
+        if (requestTokens.get(job.el) === job.token) {
+          requestTokens.delete(job.el);
+          if (seen.get(job.el) === job.text) seen.delete(job.el);
+        }
         continue;
       }
       active++;
@@ -666,14 +734,19 @@
           return response.result;
         })
         .then((data) => {
-          if (!data || !settings.enabled || !job.el.isConnected || analysisTextOf(job.el) !== job.text) return;
+          if (!data || !settings.enabled || !job.el.isConnected ||
+              requestTokens.get(job.el) !== job.token || seen.get(job.el) !== job.text ||
+              analysisTextOf(job.el) !== job.text) return;
           const flagged = Number(data.max_score) >= Number(settings.threshold);
           updateAnalytics(data, flagged);
           if (flagged) conceal(job.el, assessToxicity(data));
           else reveal(job.el);
         })
         .catch((err) => {
-          seen.delete(job.el);
+          if (requestTokens.get(job.el) === job.token) {
+            requestTokens.delete(job.el);
+            seen.delete(job.el);
+          }
           console.debug("[Toxicity Filter] analysis failed:", err.message);
         })
         .finally(() => { active--; drain(); });
@@ -743,18 +816,6 @@
       state.revealed = false;
       if (el.tabIndex < 0) el.setAttribute("tabindex", "0");
       setBlurredAppearance(el, state, true);
-      const toggleOnInput = (event) => {
-        if (event.type === "keydown" && (event.target !== el || !["Enter", " "].includes(event.key))) return;
-        if (event.target instanceof Element && event.target.closest('[data-toxicity-exempt="true"]')) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        state.revealed = !state.revealed;
-        setBlurredAppearance(el, state, !state.revealed);
-      };
-      el.addEventListener("click", toggleOnInput, true);
-      el.addEventListener("keydown", toggleOnInput, true);
-      state.toggleOnInput = toggleOnInput;
     }
 
     hidden.set(el, state);
@@ -831,6 +892,59 @@
     event.stopImmediatePropagation();
   }
 
+  let pendingPointerClick = null;
+
+  function toggleBlurredContent(event) {
+    // Use pointerup for mouse, pen, and touch. Some social apps cancel the
+    // synthesized click while handling their own pointer/touch interactions.
+    if (event.type === "pointerup") {
+      pendingPointerClick = null;
+      if (event.button !== 0 || event.isPrimary === false) return;
+    }
+    if (event.type === "keydown" && !["Enter", " "].includes(event.key)) return;
+    const path = event.composedPath?.() || [event.target];
+    for (let index = 0; index < path.length; index++) {
+      const node = path[index];
+      if (!(node instanceof Element)) continue;
+      const state = hidden.get(node);
+      if (state?.mode !== "blur") continue;
+      if (event.type === "keydown" && event.target !== node) return;
+      // A blurred message can contain links, media, or embedded controls. Let
+      // those targets keep their normal behavior instead of treating them as
+      // a request to reveal the whole message.
+      const targetPath = path.slice(0, index + 1);
+      if (targetPath.some((target) => target instanceof Element && target.matches(
+        'a[href], button, input, textarea, select, img, video, audio, [role="button"], [contenteditable="true"], [data-toxicity-control], [data-toxicity-exempt="true"]',
+      ))) return;
+      if (event.type === "pointerup") {
+        const activation = { el: node, at: performance.now() };
+        pendingPointerClick = activation;
+        setTimeout(() => {
+          if (pendingPointerClick === activation) pendingPointerClick = null;
+        }, 800);
+      }
+      consumeToggleEvent(event);
+      state.revealed = !state.revealed;
+      setBlurredAppearance(node, state, !state.revealed);
+      return;
+    }
+  }
+
+  function suppressPointerClick(event) {
+    if (event.detail === 0) return;
+    const activation = pendingPointerClick;
+    pendingPointerClick = null;
+    if (!activation || performance.now() - activation.at > 800) return;
+    if ((event.composedPath?.() || [event.target]).includes(activation.el)) consumeToggleEvent(event);
+  }
+
+  // Capture the completed pointer action before page-level handlers can cancel
+  // the synthesized click. Suppress that same click without toggling twice.
+  // Keyboard users activate the focused comment through keydown.
+  window.addEventListener("pointerup", toggleBlurredContent, true);
+  window.addEventListener("click", suppressPointerClick, true);
+  window.addEventListener("keydown", toggleBlurredContent, true);
+
   function bindHideControl(state) {
     state.control.addEventListener("click", state.showOnInput);
     state.control.addEventListener("keydown", state.showOnInput);
@@ -898,7 +1012,8 @@
       setImportantStyle(el, "transition", "color 120ms ease, text-shadow 120ms ease");
       setImportantStyle(el, "cursor", "pointer");
       el.dataset.toxicityBlurred = "true";
-      el.dataset.toxicityLabel = `${state.assessment.label} · Click to reveal`;
+      const revealAction = matchMedia("(hover: none), (pointer: coarse)").matches ? "Tap" : "Click";
+      el.dataset.toxicityLabel = `${state.assessment.label} · ${revealAction} to reveal`;
       el.dataset.toxicityLevel = state.assessment.level;
       const surface = getBackgroundSurface(el);
       el.dataset.toxicityTheme = surface.dark ? "dark" : "light";
@@ -942,8 +1057,6 @@
       if (state.old.tabindex === null) el.removeAttribute("tabindex");
       else el.setAttribute("tabindex", state.old.tabindex);
     } else {
-      el.removeEventListener("click", state.toggleOnInput, true);
-      el.removeEventListener("keydown", state.toggleOnInput, true);
       restoreStyle(el, "color", state.old.color);
       restoreStyle(el, "-webkit-text-fill-color", state.old.webkitTextFillColor);
       restoreStyle(el, "text-shadow", state.old.textShadow);
@@ -973,20 +1086,44 @@
   }
 
   const observedRoots = new WeakSet();
+  const observedViewportCandidates = new WeakSet();
+  const viewportObserver = typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) scheduleIncrementalScan(entry.target);
+      }
+    }, { rootMargin: "500px 0px" })
+    : null;
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.type === "attributes") {
         const state = hidden.get(m.target);
         if (state?.mode === "blur" && !state.revealed) setBlurredAppearance(m.target, state, true);
+        observeViewportCandidate(m.target);
         scheduleIncrementalScan(m.target);
       }
       if (m.type === "characterData") scheduleIncrementalScan(m.target.parentElement);
       for (const node of m.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) observeTree(node);
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // The document (or its shadow root) already observes this subtree.
+          // Observing every inserted element again creates overlapping
+          // MutationObserver registrations and duplicate scan work on busy feeds.
+          scheduleIncrementalScan(node);
+          observeViewportCandidates(node);
+          observeShadowRoots(node);
+        }
         else if (node.nodeType === Node.TEXT_NODE) scheduleIncrementalScan(m.target);
       }
     }
   });
+
+  function observeShadowRoots(root) {
+    if (!root?.querySelectorAll) return;
+    if (root instanceof Element && root.shadowRoot) observeTree(root.shadowRoot);
+    for (const el of root.querySelectorAll("*")) {
+      if (el.shadowRoot) observeTree(el.shadowRoot);
+    }
+  }
 
   function observeTree(root) {
     if (!root) return;
@@ -1004,15 +1141,31 @@
       });
     }
     scheduleIncrementalScan(root);
-    if (root.querySelectorAll) {
-      for (const el of root.querySelectorAll("*")) {
-        if (el.shadowRoot) observeTree(el.shadowRoot);
-      }
-    }
+    observeViewportCandidates(root);
+    observeShadowRoots(root);
+  }
+
+  function observeViewportCandidate(el) {
+    if (!viewportObserver || !(el instanceof Element) || observedViewportCandidates.has(el)) return;
+    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : ITEM_SELECTOR;
+    if (selector === ":not(*)" || !el.matches(selector)) return;
+    observedViewportCandidates.add(el);
+    viewportObserver.observe(el);
+  }
+
+  function observeViewportCandidates(root) {
+    if (!viewportObserver || !root) return;
+    observeViewportCandidate(root);
+    if (!root.querySelectorAll) return;
+    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : ITEM_SELECTOR;
+    if (selector === ":not(*)") return;
+    for (const el of root.querySelectorAll(selector)) observeViewportCandidate(el);
   }
 
   observeTree(document.documentElement);
-  document.addEventListener("scroll", scheduleDocumentScan, { capture: true, passive: true });
+  if (!viewportObserver) {
+    document.addEventListener("scroll", scheduleDocumentScan, { capture: true, passive: true });
+  }
   window.addEventListener("resize", scheduleDocumentScan, { passive: true });
   window.addEventListener("pageshow", scheduleDocumentScan);
   window.addEventListener("load", scheduleDocumentScan, { once: true });
