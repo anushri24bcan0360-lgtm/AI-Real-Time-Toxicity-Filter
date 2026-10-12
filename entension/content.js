@@ -1,8 +1,7 @@
 (() => {
   "use strict";
 
-  // Shared selectors require an explicit comment/message identity. Broad text
-  // selectors such as p, [dir=auto], or #message are only used inside a known row.
+  // Scan recognized comment and message rows only.
   const BASE_ITEM_SELECTORS = [
     '[data-testid*="comment" i]', '[data-testid*="message" i]',
     '[data-message-id]', '[data-comment-id]', '[data-message-author-role]',
@@ -140,8 +139,7 @@
   const MASTODON_ADAPTER = PLATFORM_ADAPTERS.find(({ hosts }) => hosts.includes("mastodon.social"));
   const PLATFORM = PLATFORM_ADAPTERS.find(({ hosts }) => hosts.some(hostMatches)) ||
     (document.querySelector("article.status .status__content, article.status .status__prepend") ? MASTODON_ADAPTER : null);
-  // Instagram uses generic utility classes in its inbox; only its verified comment
-  // rows and rounded message bubbles are safe scan boundaries there.
+  // Instagram requires stricter comment boundaries.
   const genericSelectors = INSTAGRAM_HOST ? [] : BASE_ITEM_SELECTORS;
   const genericBodies = INSTAGRAM_HOST ? [] : BASE_BODY_SELECTORS;
   const ITEM_SELECTOR = [...genericSelectors, ...(PLATFORM?.items || [])].join(",") || ":not(*)";
@@ -161,7 +159,7 @@
     "legal", "locations", "p", "privacy", "reel", "reels", "stories", "tags",
     "terms", "tv",
   ]);
-  const defaults = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2 };
+  const defaults = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2, modelMode: "both" };
   let seen = new WeakMap();
   let requestTokens = new WeakMap();
   const hidden = new WeakMap();
@@ -177,7 +175,10 @@
   }
 
   function updateAnalytics(data, wasBlurred) {
-    const categories = Object.keys(data.scores || {}).filter((key) => Number(data.scores[key]) >= Number(settings.threshold));
+    const categories = [...new Set([
+      ...Object.keys(data.scores || {}).filter((key) => Number(data.scores[key]) >= Number(settings.threshold)),
+      ...(data.flagged_categories || []),
+    ])];
     const site = location.hostname || "unknown site";
     storageQueue = storageQueue.then(async () => {
       const { analytics = { scanned: 0, blurred: 0, categories: {}, sites: {} } } = await chrome.storage.local.get("analytics");
@@ -254,7 +255,7 @@
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    const recheck = Boolean(changes.threshold || changes.filterMode || (changes.enabled && changes.enabled.newValue));
+    const recheck = Boolean(changes.threshold || changes.filterMode || changes.modelMode || (changes.enabled && changes.enabled.newValue));
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
     if (!settings.enabled) {
       seen = new WeakMap();
@@ -412,7 +413,7 @@
       .sort((a, b) => Number(b[1]) - Number(a[1]))
       .map(([category]) => names[category] || category.replaceAll("_", " "));
     const fallback = (data.flagged_categories || []).map((category) => names[category] || category.replaceAll("_", " "));
-    const labels = [...new Set(categories.length ? categories : fallback)].slice(0, 2);
+    const labels = [...new Set([...categories, ...fallback])].slice(0, 2);
     const maxScore = Number(data.max_score) || 0;
     const severeScore = Math.max(
       Number(scores.severe_toxic) || 0,
@@ -462,7 +463,7 @@
       if (text.length >= 2 && text.length <= 2000) found.add(el);
     };
 
-    // Analyze only explicit message-body fields, or text inside a recognized message row.
+    // Prefer explicit message-body fields.
     for (const item of items) {
       if (!isNearViewport(item)) continue;
       if (item.matches(BODY_SELECTOR)) addIfMessageText(item);
@@ -476,8 +477,7 @@
       }
     }
 
-    // Instagram's DM bubbles lack stable semantic attributes. Require a rounded, visibly
-    // styled bubble ancestor so names, navigation labels, and profile text are skipped.
+    // Use visible bubble boundaries for Instagram DMs.
     if (INSTAGRAM_HOST) {
       const scanRoot = root instanceof Element ? root : document.documentElement;
       const commentRows = new Set();
@@ -489,8 +489,7 @@
       for (const row of commentRows) {
         if (!isNearViewport(row) || !isLikelyInstagramCommentRow(row)) continue;
         verifiedRows++;
-        // Instagram's comment bodies don't have stable test IDs. In a verified
-        // comment row, scan text spans outside usernames and action controls.
+        // Scan text spans inside verified comment rows.
         for (const textEl of row.querySelectorAll("span[dir='auto'], span")) {
           if (!textEl.querySelector("span") || textEl.matches("[dir='auto']")) {
             addIfMessageText(textEl, row);
@@ -498,9 +497,7 @@
         }
       }
 
-      // Some Instagram layouts use nested divs instead of li/listitem rows.
-      // When no semantic rows were found, locate compact containers that pair
-      // a profile link with a text span and use those as comment boundaries.
+      // Handle Instagram layouts without semantic row elements.
       if (!verifiedRows) {
         const textElements = new Set();
         if (scanRoot.matches?.("span")) textElements.add(scanRoot);
@@ -728,7 +725,7 @@
       }
       active++;
       Promise.resolve()
-        .then(() => chrome.runtime.sendMessage({ type: "toxicity:analyze", comment: job.text }))
+        .then(() => chrome.runtime.sendMessage({ type: "toxicity:analyze", comment: job.text, modelMode: settings.modelMode, threshold: settings.threshold }))
         .then((response) => {
           if (!response?.ok) throw new Error(response?.error || "Analysis request failed");
           return response.result;
@@ -737,7 +734,7 @@
           if (!data || !settings.enabled || !job.el.isConnected ||
               requestTokens.get(job.el) !== job.token || seen.get(job.el) !== job.text ||
               analysisTextOf(job.el) !== job.text) return;
-          const flagged = Number(data.max_score) >= Number(settings.threshold);
+          const flagged = Boolean(data.is_toxic) || Number(data.max_score) >= Number(settings.threshold);
           updateAnalytics(data, flagged);
           if (flagged) conceal(job.el, assessToxicity(data));
           else reveal(job.el);
@@ -895,8 +892,7 @@
   let pendingPointerClick = null;
 
   function toggleBlurredContent(event) {
-    // Use pointerup for mouse, pen, and touch. Some social apps cancel the
-    // synthesized click while handling their own pointer/touch interactions.
+    // Pointer events keep tap-to-reveal working across social sites.
     if (event.type === "pointerup") {
       pendingPointerClick = null;
       if (event.button !== 0 || event.isPrimary === false) return;
@@ -909,9 +905,7 @@
       const state = hidden.get(node);
       if (state?.mode !== "blur") continue;
       if (event.type === "keydown" && event.target !== node) return;
-      // A blurred message can contain links, media, or embedded controls. Let
-      // those targets keep their normal behavior instead of treating them as
-      // a request to reveal the whole message.
+      // Keep links and embedded controls interactive.
       const targetPath = path.slice(0, index + 1);
       if (targetPath.some((target) => target instanceof Element && target.matches(
         'a[href], button, input, textarea, select, img, video, audio, [role="button"], [contenteditable="true"], [data-toxicity-control], [data-toxicity-exempt="true"]',
@@ -938,9 +932,7 @@
     if ((event.composedPath?.() || [event.target]).includes(activation.el)) consumeToggleEvent(event);
   }
 
-  // Capture the completed pointer action before page-level handlers can cancel
-  // the synthesized click. Suppress that same click without toggling twice.
-  // Keyboard users activate the focused comment through keydown.
+  // Prevent pointer and click handlers from toggling reveal twice.
   window.addEventListener("pointerup", toggleBlurredContent, true);
   window.addEventListener("click", suppressPointerClick, true);
   window.addEventListener("keydown", toggleBlurredContent, true);
@@ -1105,9 +1097,7 @@
       if (m.type === "characterData") scheduleIncrementalScan(m.target.parentElement);
       for (const node of m.addedNodes) {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          // The document (or its shadow root) already observes this subtree.
-          // Observing every inserted element again creates overlapping
-          // MutationObserver registrations and duplicate scan work on busy feeds.
+          // The document already observes this subtree.
           scheduleIncrementalScan(node);
           observeViewportCandidates(node);
           observeShadowRoots(node);

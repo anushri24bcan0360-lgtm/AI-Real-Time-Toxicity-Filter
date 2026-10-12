@@ -2,7 +2,7 @@ const API_HEALTH_URL = "http://127.0.0.1:8000/";
 const STATUS_TIMEOUT_MS = 2000;
 const STATUS_REFRESH_MS = 5000;
 
-const DEFAULTS = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2 };
+const DEFAULTS = { enabled: true, threshold: 0.8, thresholdVersion: 1, filterMode: "blur", filterModeVersion: 2, modelMode: "both" };
 
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
@@ -16,6 +16,8 @@ const settingsTab = document.getElementById("settings-tab");
 const dashboardTab = document.getElementById("dashboard-tab");
 const settingsView = document.getElementById("settings-view");
 const dashboardView = document.getElementById("dashboard-view");
+const modelModeInput = document.getElementById("model-mode");
+const DASHBOARD_CATEGORIES = ["Toxic", "Severe Toxic", "Obscene", "Threat", "Insult", "Identity Hate"];
 
 function showTab(name) {
   const dashboard = name === "dashboard";
@@ -49,17 +51,16 @@ async function renderDashboard() {
   document.getElementById("wellness-label").textContent = score >= 85 ? "Your feed looks calm" : score >= 60 ? "Some rough patches" : "A lot of toxic content detected";
   document.getElementById("wellness-hint").textContent = siteScanned ? "Based on " + siteScanned.toLocaleString() + " analyzed comments across " + sites.length + " site" + (sites.length === 1 ? "" : "s") + "." : "Your score will appear after comments are analyzed.";
   const categories = analytics.categories || {};
-  const rows = Object.entries(categories).sort((a, b) => b[1] - a[1]);
+  const rows = DASHBOARD_CATEGORIES.map((name) => [name, Number(categories[name]) || 0]);
   const total = rows.reduce((sum, [, count]) => sum + Number(count || 0), 0);
   const chart = document.getElementById("category-chart");
-  chart.innerHTML = total ? rows.map(([name, count]) => {
-    const pct = Math.round(100 * count / total);
+  chart.innerHTML = rows.map(([name, count]) => {
+    const pct = total ? Math.round(100 * count / total) : 0;
     const safeName = name.replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
     return '<div class="chart-row"><span>' + safeName + '</span><div class="bar"><i style="width:' + pct + '%"></i></div><strong>' + pct + '%</strong></div>';
-  }).join("") : "No flagged comments yet.";
+  }).join("");
 }
 
-// ---------- Connection status ----------
 async function checkConnection() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), STATUS_TIMEOUT_MS);
@@ -79,7 +80,6 @@ function setStatus(connected) {
   statusText.textContent = connected ? "Toxicity model connected" : "Model offline · run start_backend.bat";
 }
 
-// ---------- Settings ----------
 function formatThreshold(value) {
   return Number(value).toFixed(2);
 }
@@ -115,10 +115,15 @@ async function loadSettings() {
     updates.threshold = stored.threshold;
     updates.thresholdVersion = 1;
   }
+  if (!["english", "hinglish", "both"].includes(stored.modelMode)) {
+    stored.modelMode = DEFAULTS.modelMode;
+    updates.modelMode = stored.modelMode;
+  }
   if (Object.keys(updates).length) await chrome.storage.local.set(updates);
   renderEnabled(stored.enabled);
   renderThreshold(stored.threshold);
   filterModeInput.value = stored.filterMode;
+  modelModeInput.value = stored.modelMode;
 }
 
 enabledInput.addEventListener("change", () => {
@@ -127,7 +132,6 @@ enabledInput.addEventListener("change", () => {
   chrome.storage.local.set({ enabled });
 });
 
-// Update the label live while dragging, save to storage on every change
 thresholdInput.addEventListener("input", () => {
   const threshold = parseFloat(thresholdInput.value);
   thresholdValue.textContent = formatThreshold(threshold);
@@ -138,7 +142,10 @@ filterModeInput.addEventListener("change", () => {
   chrome.storage.local.set({ filterMode: filterModeInput.value, filterModeVersion: 2 });
 });
 
-// ---------- Init ----------
+modelModeInput.addEventListener("change", () => {
+  chrome.storage.local.set({ modelMode: modelModeInput.value });
+});
+
 loadSettings();
 checkConnection();
 setInterval(checkConnection, STATUS_REFRESH_MS);

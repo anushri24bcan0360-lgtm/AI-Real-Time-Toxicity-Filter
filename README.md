@@ -12,6 +12,10 @@ The model files are read from `backend/model` and `backend/model_hinglish`. The 
 4. Check `http://127.0.0.1:8000/`. The response should contain `"model_loaded": true` after startup. `http://127.0.0.1:8000/docs` provides an interactive API page.
 5. In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the `entension` folder. Keep the backend window running while using the extension.
 
+In the extension popup's **Dashboard** tab, choose **English only**, **Hinglish only**, or **English + Hinglish (both)** under **Language models**. The default is **both**. The choice is saved locally and applies to new comment analyses; changing it rechecks comments currently on the page. Both model checkpoints are still loaded by the backend at startup, while the selection controls which model inference runs for each comment.
+
+Hinglish model labels use separate default cutoffs (0.55 for profanity and targeted abuse; 0.30 for hate-related labels), based on the model card's recommended ranges. The popup sensitivity control scales these cutoffs along with the English cutoff. Override the defaults with `HINGLISH_PROFANITY_THRESHOLD`, `HINGLISH_ABUSE_THRESHOLD`, and `HINGLISH_HATE_THRESHOLD` if you later calibrate them on labeled validation data. These starting values have not been calibrated on this project's own dataset.
+
 To try a Hinglish message directly against the running API in PowerShell:
 
 ```powershell

@@ -18,12 +18,9 @@ import onnxruntime as ort
 import torch
 from transformers import AutoTokenizer, BertForSequenceClassification
 
-MAX_LEN = 128  # maximum sequence length enforced at tokenization time
+MAX_LEN = 128
 
 
-# --------------------------------------------------------------------------
-# 1. Export
-# --------------------------------------------------------------------------
 class BertOnnxWrapper(torch.nn.Module):
     """Returns a plain logits tensor (not a ModelOutput) so the ONNX graph has one clean output."""
 
@@ -56,12 +53,12 @@ def export_to_onnx(model_dir: str, output_path: str, opset: int = 17):
         )
 
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
-    # "eager" attention traces more reliably than SDPA for ONNX export
+    # Eager attention exports more reliably than SDPA.
     model = BertForSequenceClassification.from_pretrained(model_dir, attn_implementation="eager")
     model.eval()
     wrapper = BertOnnxWrapper(model).eval()
 
-    # Dummy batch of 2 with a short sequence, so neither dim gets specialised to 1/MAX_LEN
+    # Use a short, multi-item dummy batch for dynamic axes.
     dummy = tokenizer(
         ["export example sentence", "another example"],
         padding="max_length",
@@ -91,19 +88,16 @@ def export_to_onnx(model_dir: str, output_path: str, opset: int = 17):
     )
     with torch.no_grad():
         try:
-            # Legacy TorchScript exporter: honours `dynamic_axes` directly (torch >= 2.5)
+            # Use the legacy exporter for dynamic axes.
             torch.onnx.export(wrapper, args, output_path, dynamo=False, **export_kwargs)
         except TypeError:
-            # Older torch versions don't have the `dynamo` kwarg and already use the legacy exporter
+            # Older PyTorch versions do not accept `dynamo`.
             torch.onnx.export(wrapper, args, output_path, **export_kwargs)
 
     print(f"[export] Saved ONNX model to {output_path}")
     return tokenizer, wrapper
 
 
-# --------------------------------------------------------------------------
-# 2. Validate against PyTorch
-# --------------------------------------------------------------------------
 def validate(tokenizer, torch_model, onnx_path: str, text: str = "This is a validation sentence."):
     session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
     enc = tokenizer(text, truncation=True, max_length=MAX_LEN, return_tensors="pt")
@@ -125,14 +119,11 @@ def validate(tokenizer, torch_model, onnx_path: str, text: str = "This is a vali
     print(f"[validate] max |torch - onnx| = {max_diff:.2e}")
     assert max_diff < 1e-3, "ONNX output deviates from PyTorch output!"
 
-    # Your config.json says problem_type = multi_label_classification -> use sigmoid, not softmax
+    # Multi-label outputs use sigmoid.
     probs = 1 / (1 + np.exp(-onnx_logits))
     print(f"[validate] sigmoid probs: {np.round(probs, 4)}")
 
 
-# --------------------------------------------------------------------------
-# 3. Latency benchmark (single string input)
-# --------------------------------------------------------------------------
 def benchmark_latency(
     tokenizer,
     onnx_path: str,
@@ -151,7 +142,7 @@ def benchmark_latency(
         ).astype(np.int64),
     }
 
-    for _ in range(warmup):  # warm-up: lazy init, memory arenas, caches
+    for _ in range(warmup):
         session.run(None, feed)
 
     timings_ms = []

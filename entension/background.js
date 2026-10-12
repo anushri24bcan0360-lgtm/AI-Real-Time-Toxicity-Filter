@@ -9,8 +9,7 @@ function resetAnalytics() {
   });
 }
 
-// An extension reload/update fires onInstalled; a browser profile restart fires
-// onStartup. Do not reset on service-worker wakeups, which happen routinely.
+// Reset analytics on install, update, and browser startup.
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install" || reason === "update") resetAnalytics();
 });
@@ -21,6 +20,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "toxicity:analyze") return false;
 
   const comment = typeof message.comment === "string" ? message.comment.trim() : "";
+  const modelMode = ["english", "hinglish", "both"].includes(message.modelMode) ? message.modelMode : "both";
+  const requestedThreshold = Number(message.threshold);
+  const threshold = Number.isFinite(requestedThreshold) ? Math.min(0.95, Math.max(0.5, requestedThreshold)) : 0.8;
   if (!comment || comment.length > 10000) {
     sendResponse({ ok: false, error: "Comment is empty or too long." });
     return false;
@@ -29,7 +31,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ comment }),
+    body: JSON.stringify({ comment, model_mode: modelMode, threshold }),
   })
     .then(async (response) => {
       if (!response.ok) throw new Error(`API returned ${response.status}`);
