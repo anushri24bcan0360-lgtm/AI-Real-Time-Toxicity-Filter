@@ -19,6 +19,7 @@
   const EXPLICIT_COMMENT_ITEM_SELECTOR = [
     '[data-testid*="comment" i]', '[data-comment-id]', '[data-e2e*="comment" i]',
     '[data-test-id*="comment" i]', '[data-ad-rendering-role="comment"]',
+    '[data-commentid]', '[aria-label^="Comment by" i]', '[aria-label^="Reply by" i]',
     '[class~="comment" i]', '[class*="comment-item" i]',
     ".comments-comment-item", "shreddit-comment", "ytd-comment-view-model",
   ].join(",");
@@ -35,9 +36,16 @@
     },
     {
       hosts: ["x.com", "twitter.com"],
-      items: ['article[data-testid="tweet"]', '[data-testid="messageEntry"]'],
-      bodies: ['[data-testid="tweetText"]', '[data-testid="messageEntry"] [dir="auto"]', '[data-testid="messageText"]'],
-      repliesOnly: true,
+      items: [
+        'article[data-testid="tweet"]', 'article[role="article"]', '[data-testid="tweet"]',
+        '[data-testid="messageEntry"]',
+      ],
+      bodies: [
+        '[data-testid="tweetText"]', '[data-testid="messageEntry"] [dir="auto"]',
+        '[data-testid="messageEntry"] [data-testid*="messageText" i]',
+        '[data-testid^="message-text-" i]', '[data-testid*="messageText" i]',
+        '[data-testid="messageText"]', 'article span[dir="auto"]', '[lang][dir] span',
+      ],
     },
     {
       hosts: ["youtube.com"],
@@ -51,68 +59,19 @@
     },
     {
       hosts: ["facebook.com"],
-      items: ["[data-ad-rendering-role='comment']"],
-      bodies: ['[data-ad-comet-preview="message"]', "[data-ad-rendering-role='comment'] [dir='auto']"],
-    },
-    {
-      hosts: ["threads.net"],
-      items: ["div[role='article']"],
-      bodies: ["[dir='auto']"],
-      repliesOnly: true,
-    },
-    {
-      hosts: ["tiktok.com"],
       items: [
-        '[data-e2e="comment-item"]', '[data-e2e="comment-level-1"]',
-        '[data-e2e="comment-level-2"]', '[data-e2e="chat-item"]',
-        '[data-e2e="chat-line"]', '[data-e2e="chat-message"]',
-        '[data-e2e*="comment" i]', '[data-e2e*="chat" i]',
+        "[data-ad-rendering-role='comment']", "[data-commentid]", "[data-comment-id]",
+        "[aria-label^='Comment by' i]", "[aria-label^='Reply by' i]",
       ],
       bodies: [
-        '[data-e2e="comment-text"]', '[data-e2e="comment-level-1"]',
-        '[data-e2e="comment-level-2"]', '[data-e2e="chat-message"]',
-        '[data-e2e*="comment-text" i]', '[data-e2e*="chat-message" i]',
+        '[data-ad-comet-preview="message"]', '[data-ad-preview="message"]',
+        "[dir='auto']",
       ],
     },
     {
-      hosts: ["discord.com", "discordapp.com"],
-      items: ["li[id^='chat-messages-']", "[id^='chat-messages-']"],
-      bodies: ["[id^='message-content-']", "[class*='messageContent']"],
-    },
-    {
-      hosts: ["twitch.tv"],
-      items: ['[data-test-selector="chat-line-message"]'],
-      bodies: ['[data-a-target="chat-line-message-body"]', '[data-a-target="chat-line-message"]'],
-    },
-    {
-      hosts: ["linkedin.com"],
-      items: [".comments-comment-item", '[data-test-id*="comment" i]', ".msg-s-message-list__event"],
-      bodies: [
-        ".comments-comment-item__comment-text", ".comments-comment-item__main-content",
-        '[data-test-id*="comment" i] [dir="auto"]', ".msg-s-message-list__event [dir='auto']",
-      ],
-    },
-    {
-      hosts: ["bsky.app"],
-      items: ["[data-testid*='postThreadItem']"],
-      bodies: ["[data-testid='postText']"],
-      repliesOnly: true,
-    },
-    {
-      hosts: ["mastodon.social", "mastodon.online", "fosstodon.org"],
-      items: ["article.status"],
-      bodies: [".status__content", ".status__content__text"],
-      repliesOnly: true,
-    },
-    {
-      hosts: ["pinterest.com"],
-      items: ["[data-test-id*='comment' i]"],
-      bodies: ["[data-test-id='comment-body']", "[data-test-id*='comment' i] [dir='auto']"],
-    },
-    {
-      hosts: ["kick.com"],
-      items: ["[data-testid='chat-message']", ".chat-entry"],
-      bodies: ["[data-testid='chat-message-text']", ".chat-entry-content"],
+      hosts: ["threads.net", "threads.com"],
+      items: ["div[role='article']", "[data-pressable-container='true']"],
+      bodies: ["[dir='auto']"],
     },
     {
       hosts: ["whatsapp.com"],
@@ -121,24 +80,18 @@
     },
     {
       hosts: ["telegram.org"],
-      items: [".message", ".message-in", ".message-out"],
-      bodies: [".text-content", ".message-content", ".translatable-message"],
-    },
-    {
-      hosts: ["slack.com"],
-      items: ["[data-qa='virtual-list-item']", "[data-qa='message_container']"],
-      bodies: ["[data-qa='message_content']", ".c-message_kit__message__text"],
-    },
-    {
-      hosts: ["messenger.com"],
-      items: ["[data-testid*='message' i]"],
-      bodies: ["[data-testid*='message-text' i]", "[data-testid*='message-body' i]"],
+      items: [
+        ".bubble:not(.service):not(.is-date)", ".MessageList .Message:not(.ActionMessage)",
+        "[data-message-id]", ".message", ".message-in", ".message-out",
+      ],
+      bodies: [
+        ".text-content", ".message-content", ".translatable-message", ".message",
+        "[dir='auto']",
+      ],
     },
   ];
   const INSTAGRAM_HOST = /(^|\.)instagram\.com$/i.test(location.hostname);
-  const MASTODON_ADAPTER = PLATFORM_ADAPTERS.find(({ hosts }) => hosts.includes("mastodon.social"));
-  const PLATFORM = PLATFORM_ADAPTERS.find(({ hosts }) => hosts.some(hostMatches)) ||
-    (document.querySelector("article.status .status__content, article.status .status__prepend") ? MASTODON_ADAPTER : null);
+  const PLATFORM = PLATFORM_ADAPTERS.find(({ hosts }) => hosts.some(hostMatches));
   // Instagram requires stricter comment boundaries.
   const genericSelectors = INSTAGRAM_HOST ? [] : BASE_ITEM_SELECTORS;
   const genericBodies = INSTAGRAM_HOST ? [] : BASE_BODY_SELECTORS;
@@ -174,6 +127,35 @@
     return location.hostname === host || location.hostname.endsWith(`.${host}`);
   }
 
+  function isXMessagesContext() {
+    return (hostMatches("x.com") || hostMatches("twitter.com")) && /^\/messages(?:\/|$)/i.test(location.pathname);
+  }
+
+  function activeItemSelector() {
+    const isThreads = PLATFORM?.hosts.includes("threads.com");
+    const threadsContainer = "[data-pressable-container='true']";
+    if (isThreads && hostMatches("threads.com")) return threadsContainer;
+    if (isThreads && document.querySelector(threadsContainer)) return threadsContainer;
+    if (isThreads) return "div[role='article']";
+    return ITEM_SELECTOR;
+  }
+
+  function isFacebookReelsContext() {
+    return hostMatches("facebook.com") && /\/(?:reel|reels)(?:\/|$)/i.test(location.pathname);
+  }
+
+  function isFacebookReelCommentItem(item) {
+    if (!(item instanceof HTMLElement) || !item.matches("[role='article']")) return false;
+    const label = item.getAttribute("aria-label") || "";
+    if (/^(?:comment|reply)\s+by\b/i.test(label)) return true;
+    if (item.matches("[data-commentid], [data-comment-id]")) return true;
+    const hasReplyAction = [...item.querySelectorAll("button, [role='button']")].some((control) => {
+      const labelText = `${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${textOf(control)}`;
+      return /^\s*reply\b/i.test(labelText);
+    });
+    return hasReplyAction && Boolean(item.querySelector("[dir='auto']"));
+  }
+
   function updateAnalytics(data, wasBlurred) {
     const categories = [...new Set([
       ...Object.keys(data.scores || {}).filter((key) => Number(data.scores[key]) >= Number(settings.threshold)),
@@ -201,7 +183,7 @@
   document.addEventListener("contextmenu", (event) => {
     const selection = String(window.getSelection?.() || "").replace(/\s+/g, " ").trim();
     const target = event.target instanceof Element ? event.target : null;
-    const targetItem = target?.closest(ITEM_SELECTOR);
+    const targetItem = target?.closest(activeItemSelector());
     let candidate = target?.closest(BODY_SELECTOR) || targetItem;
     if (PLATFORM?.repliesOnly && (!targetItem || !isTargetItem(targetItem))) candidate = null;
     if (!candidate && INSTAGRAM_HOST && target) {
@@ -327,10 +309,7 @@
     if (INSTAGRAM_HOST) return path.length === 1 && !INSTAGRAM_RESERVED_PROFILE_PATHS.has(path[0].toLowerCase());
     if (hostMatches("x.com") || hostMatches("twitter.com")) return path.length === 1 && !/^(home|explore|search|notifications|messages)$/i.test(path[0]);
     if (hostMatches("reddit.com")) return path.length === 2 && /^(user|u)$/i.test(path[0]);
-    if (hostMatches("tiktok.com")) return path.length === 1 && path[0].startsWith("@");
     if (hostMatches("youtube.com")) return path.length === 1 && path[0].startsWith("@");
-    if (hostMatches("linkedin.com")) return path.length === 2 && /^(in|company)$/i.test(path[0]);
-    if (hostMatches("bsky.app")) return path.length === 2 && path[0] === "profile";
     if (hostMatches("facebook.com")) return path.length === 1 || path[0] === "profile.php";
     if (/^@[^/]+$/.test(path[0] || "")) return true;
     return false;
@@ -348,6 +327,8 @@
   function isReplyItem(item) {
     if (item.matches("[data-testid*='replying' i], [data-test-id*='replying' i], [aria-label*='replying to' i], [class*='replying' i], .status__prepend")) return true;
     if (item.querySelector("[data-testid*='replying' i], [data-test-id*='replying' i], [aria-label*='replying to' i], [class*='replying' i], .status__prepend")) return true;
+    if ((hostMatches("x.com") || hostMatches("twitter.com")) &&
+        [...item.querySelectorAll("[data-testid='socialContext']")].some((context) => /^replying to\b/i.test(textOf(context)))) return true;
     const leadingText = (item.innerText || item.textContent || "").split(/\n+/).slice(0, 4).join(" ").trim();
     return /\b(?:replying to|replied to|responding to)\b/i.test(leadingText.slice(0, 250));
   }
@@ -435,41 +416,58 @@
 
   function candidates(root) {
     const items = [];
+    const itemSelector = activeItemSelector();
     if (root instanceof Element) {
-      const ancestorItem = root.closest(ITEM_SELECTOR);
+      const ancestorItem = root.closest(itemSelector);
       if (ancestorItem && isTargetItem(ancestorItem)) items.push(ancestorItem);
-      if (root.matches(ITEM_SELECTOR) && !items.includes(root) && isTargetItem(root)) items.push(root);
+      if (root.matches(itemSelector) && !items.includes(root) && isTargetItem(root)) items.push(root);
     }
     if (root.querySelectorAll) {
-      for (const item of root.querySelectorAll(ITEM_SELECTOR)) {
+      for (const item of root.querySelectorAll(itemSelector)) {
         if (isTargetItem(item)) items.push(item);
       }
+      if (isFacebookReelsContext()) {
+        for (const item of root.querySelectorAll("[role='article']")) {
+          if (isFacebookReelCommentItem(item) && !items.includes(item)) items.push(item);
+        }
+      }
+    }
+    if (isFacebookReelsContext() && root instanceof Element &&
+        isFacebookReelCommentItem(root) && !items.includes(root)) {
+      items.push(root);
     }
 
     const found = new Set();
     const addIfMessageText = (el, instagramRow = null) => {
-      if (!(el instanceof HTMLElement) || el.closest("[data-toxicity-control]")) return;
-      if (!isVisibleTextCandidate(el)) return;
-      if (isAccountMentionElement(el)) return;
+      if (!(el instanceof HTMLElement) || el.closest("[data-toxicity-control]")) return false;
+      if (!isVisibleTextCandidate(el)) return false;
+      if (isAccountMentionElement(el)) return false;
       if (instagramRow) {
-        if (el.closest("a, button, time, nav, header, footer, form, textarea, input, [contenteditable='true'], [role='heading']")) return;
-        if (el.closest(ACCOUNT_LABEL_SELECTOR)) return;
+        if (el.closest("a, button, time, nav, header, footer, form, textarea, input, [contenteditable='true'], [role='heading']")) return false;
+        if (el.closest(ACCOUNT_LABEL_SELECTOR)) return false;
         const nestedControl = el.closest("[role='button']");
         if (nestedControl && nestedControl !== instagramRow &&
-            /^(?:like|unlike|reply|replies|more|share|report|translate|follow|hide|delete|save|view replies)(?:\s+\d+)?$/i.test(textOf(nestedControl))) return;
-      } else if (isAccountOrControlText(el) || el.matches(ACCOUNT_LABEL_SELECTOR) || el.closest(ACCOUNT_LABEL_SELECTOR)) return;
-      if (!isNearViewport(el)) return;
+            /^(?:like|unlike|reply|replies|more|share|report|translate|follow|hide|delete|save|view replies)(?:\s+\d+)?$/i.test(textOf(nestedControl))) return false;
+      } else if (isAccountOrControlText(el) || el.matches(ACCOUNT_LABEL_SELECTOR) || el.closest(ACCOUNT_LABEL_SELECTOR)) return false;
+      if (!isNearViewport(el)) return false;
       const text = analysisTextOf(el);
-      if (text.length >= 2 && text.length <= 2000) found.add(el);
+      if (text.length >= 2 && text.length <= 2000) {
+        found.add(el);
+        return true;
+      }
+      return false;
     };
 
     // Prefer explicit message-body fields.
     for (const item of items) {
       if (!isNearViewport(item)) continue;
-      if (item.matches(BODY_SELECTOR)) addIfMessageText(item);
-      for (const body of item.querySelectorAll(BODY_SELECTOR)) addIfMessageText(body);
+      let hasUsableBody = false;
+      if (item.matches(BODY_SELECTOR)) hasUsableBody = addIfMessageText(item) || hasUsableBody;
+      for (const body of item.querySelectorAll(BODY_SELECTOR)) {
+        hasUsableBody = addIfMessageText(body) || hasUsableBody;
+      }
 
-      if (item.querySelector(BODY_SELECTOR)) continue;
+      if (hasUsableBody) continue;
       for (const leaf of item.querySelectorAll("p, [dir='auto']")) {
         if (leaf.tagName === "P" || isLikelyInstagramBubbleText(leaf) || isKnownLiveChatText(leaf, item)) {
           addIfMessageText(leaf);
@@ -549,7 +547,7 @@
 
   function isKnownLiveChatText(el, row) {
     if (INSTAGRAM_HOST && row.closest("[role='log']")) return true;
-    if (PLATFORM?.hosts.includes("tiktok.com") && row.matches("[data-e2e*='chat' i]")) return true;
+    if (isXMessagesContext() && row.matches('[data-testid*="message" i]')) return true;
     return false;
   }
 
@@ -680,9 +678,16 @@
 
   function scanViewport() {
     const targets = new Set();
-    if (ITEM_SELECTOR !== ":not(*)") {
-      for (const item of document.querySelectorAll(ITEM_SELECTOR)) {
+    const itemSelector = activeItemSelector();
+    if (itemSelector !== ":not(*)") {
+      for (const item of document.querySelectorAll(itemSelector)) {
         if (isNearViewport(item)) targets.add(item);
+      }
+    }
+
+    if (isFacebookReelsContext()) {
+      for (const item of document.querySelectorAll("[role='article']")) {
+        if (isFacebookReelCommentItem(item) && isNearViewport(item)) targets.add(item);
       }
     }
 
@@ -1126,7 +1131,7 @@
         attributes: true,
         attributeFilter: [
           "style", "class", "role", "dir", "data-testid", "data-message-id",
-          "data-comment-id", "data-message-author-role", "data-e2e", "data-a-target",
+          "data-comment-id", "data-commentid", "data-message-author-role", "data-e2e", "data-a-target", "data-pressable-container", "aria-label",
         ],
       });
     }
@@ -1137,7 +1142,7 @@
 
   function observeViewportCandidate(el) {
     if (!viewportObserver || !(el instanceof Element) || observedViewportCandidates.has(el)) return;
-    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : ITEM_SELECTOR;
+    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : activeItemSelector();
     if (selector === ":not(*)" || !el.matches(selector)) return;
     observedViewportCandidates.add(el);
     viewportObserver.observe(el);
@@ -1147,7 +1152,7 @@
     if (!viewportObserver || !root) return;
     observeViewportCandidate(root);
     if (!root.querySelectorAll) return;
-    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : ITEM_SELECTOR;
+    const selector = INSTAGRAM_HOST ? INSTAGRAM_VIEWPORT_SELECTOR : activeItemSelector();
     if (selector === ":not(*)") return;
     for (const el of root.querySelectorAll(selector)) observeViewportCandidate(el);
   }
