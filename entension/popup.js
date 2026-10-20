@@ -34,12 +34,11 @@ settingsTab.addEventListener("click", () => showTab("settings"));
 dashboardTab.addEventListener("click", () => showTab("dashboard"));
 
 async function renderDashboard() {
-  const { analytics = {}, communityFlags = [] } = await chrome.storage.local.get(["analytics", "communityFlags"]);
+  const { analytics = {} } = await chrome.storage.local.get("analytics");
   const scanned = Number(analytics.scanned) || 0;
   const blurred = Number(analytics.blurred) || 0;
   document.getElementById("scanned-count").textContent = scanned.toLocaleString();
   document.getElementById("blurred-count").textContent = blurred.toLocaleString();
-  document.getElementById("flag-count").textContent = communityFlags.length.toLocaleString();
   const sites = Object.values(analytics.sites || {});
   const siteScanned = sites.reduce((sum, site) => sum + (Number(site.scanned) || 0), 0);
   const siteBlurred = sites.reduce((sum, site) => sum + (Number(site.blurred) || 0), 0);

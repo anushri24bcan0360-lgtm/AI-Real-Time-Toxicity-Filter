@@ -165,37 +165,6 @@
     }).catch((err) => console.debug("[Toxicity Filter] analytics update failed:", err.message));
   }
 
-  let reportMenu;
-  document.addEventListener("contextmenu", (event) => {
-    const selection = String(window.getSelection?.() || "").replace(/\s+/g, " ").trim();
-    const target = event.target instanceof Element ? event.target : null;
-    let candidate = target?.closest(BODY_SELECTOR) || target?.closest(activeItemSelector());
-    if (!candidate && INSTAGRAM_HOST && target) {
-      const commentText = target.closest("span");
-      if (commentText && isLikelyInstagramBubbleText(commentText)) candidate = commentText;
-      const commentRow = commentText?.closest(INSTAGRAM_COMMENT_ROW_SELECTOR);
-      if (!candidate && commentText && commentRow && isLikelyInstagramCommentRow(commentRow)) candidate = commentText;
-    }
-    const text = candidate ? (selection || analysisTextOf(candidate)) : "";
-    if (!text || text.length < 2 || text.length > 2000 || candidate?.closest("[data-toxicity-control]")) return;
-    reportMenu?.remove();
-    reportMenu = document.createElement("button");
-    reportMenu.type = "button";
-    reportMenu.dataset.toxicityControl = "true";
-    reportMenu.textContent = "⚑ Report missed toxic comment";
-    Object.assign(reportMenu.style, { position: "fixed", left: Math.min(event.clientX, innerWidth - 240) + "px", top: Math.min(event.clientY, innerHeight - 44) + "px", zIndex: "2147483647", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", color: "#0f172a", font: "13px system-ui", boxShadow: "0 4px 16px #0003", cursor: "pointer" });
-    reportMenu.addEventListener("click", async () => {
-      const { communityFlags = [] } = await chrome.storage.local.get("communityFlags");
-      communityFlags.push({ text: text.slice(0, 2000), url: location.href, site: location.hostname, reportedAt: Date.now(), source: "context-menu" });
-      await chrome.storage.local.set({ communityFlags });
-      reportMenu.textContent = "✓ Report saved on this device";
-      setTimeout(() => reportMenu?.remove(), 1300);
-    }, { once: true });
-    document.documentElement.append(reportMenu);
-    event.preventDefault();
-  }, true);
-  document.addEventListener("click", (event) => { if (reportMenu && event.target !== reportMenu) { reportMenu.remove(); reportMenu = null; } }, true);
-
   chrome.storage.local.get(null, (saved) => {
     const updates = {};
     if ((saved.filterModeVersion || 0) < 2) Object.assign(updates, { filterMode: "blur", filterModeVersion: 2 });

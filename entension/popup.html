@@ -158,9 +158,6 @@
     .chart-row:nth-child(6n+4) { --bar-color:#e6b64c; }
     .chart-row:nth-child(6n+5) { --bar-color:#6fa6e8; }
     .chart-row:nth-child(6n) { --bar-color:#bc79c9; }
-    .community-row { display:flex; align-items:flex-start; gap:10px; }
-    .flag-icon { flex:0 0 32px; width:32px; height:32px; display:grid; place-items:center; border-radius:10px; color:var(--coral); background:color-mix(in srgb, var(--coral) 12%, var(--panel)); font-size:16px; }
-    #flag-count { color:var(--accent); font-size:18px; font-variant-numeric:tabular-nums; }
     #analytics-note { text-align:center; padding:0 0 5px; font-size:10px; }
     [hidden] { display:none !important; }
   </style>
@@ -237,7 +234,6 @@
       <div class="score" id="wellness-score">100</div><div class="score-copy"><div class="label" id="wellness-label">Your feed looks calm</div><div class="hint" id="wellness-hint">Based on toxicity detected across visited sites.</div></div>
     </div></div>
     <div class="card"><div class="row"><div class="label">Toxicity types</div><span class="small">Share of detections</span></div><div id="category-chart" class="small" style="margin-top:4px">No flagged comments yet.</div></div>
-    <div class="card"><div class="community-row"><span class="flag-icon" aria-hidden="true">⚑</span><div style="flex:1"><div class="row"><div class="label">Community flags</div><strong id="flag-count">0</strong></div><div class="hint">Right-click a comment to report it. Reports are saved locally as feedback for review.</div></div></div></div>
     <div class="small" id="analytics-note">Stats are stored on this device.</div>
   </section>
 
